@@ -55,14 +55,14 @@
   function userKey(prefix, name = user) { return prefix + '_' + String(name || 'guest'); }
   function getPinnedPlans(name = user) {
     const saved = S.get(userKey('pinnedPlans', name), null);
-    if (Array.isArray(saved) && saved.length) return saved.filter((planName) => plans[planName]);
-    return ['Ganzkoerper', 'Upper/Lower', 'Push/Pull/Legs'].filter((planName) => plans[planName]);
+    if (Array.isArray(saved)) return saved.filter((planName) => plans[planName]);
+    return [];
   }
   function setPinned(name, pinned) {
     const current = new Set(getPinnedPlans(user));
     if (pinned) current.add(name); else current.delete(name);
     const next = Array.from(current).filter((item) => plans[item]);
-    S.set(userKey('pinnedPlans'), next.length ? next : ['Ganzkoerper']);
+    S.set(userKey('pinnedPlans'), next);
   }
 
   function migrateLegacyScopedSettings() {
@@ -183,6 +183,8 @@
     $('h-avatar').style.background = c.bg;
     $('h-avatar').style.color = c.c;
     $('h-name').textContent = name;
+    const pinnedOnLogin = getPinnedPlans(name);
+    if (pinnedOnLogin.length && plans[pinnedOnLogin[0]]) { plan = pinnedOnLogin[0]; days = plans[plan]; }
     day = 0; warmup = {}; openExercise = null; inputs = {}; setCounts = {}; finished = {}; daySwaps = {}; swapOpen = {};
     renderPlanTabs();
     renderDayTabs();
@@ -202,9 +204,9 @@
     screen = nextScreen;
     $('tab-home').classList.toggle('active', screen === 'home');
     $('tab-train').classList.toggle('active', screen === 'train');
-    $('tab-progress').classList.toggle('active', screen === 'progress');
     $('top-plans').classList.toggle('active', screen === 'plans');
-    $('top-settings').classList.toggle('active', screen === 'settings');
+    const accountMenu = $('account-menu');
+    if (accountMenu) accountMenu.classList.remove('show');
     $('daytabs').style.display = screen === 'train' ? 'flex' : 'none';
     $('split-tabs').style.display = screen === 'train' ? 'flex' : 'none';
     $('home-content').classList.toggle('active', screen === 'home');
@@ -223,7 +225,9 @@
   function renderPlanTabs() {
     const wrap = $('split-tabs');
     wrap.innerHTML = '';
-    Array.from(new Set(getPinnedPlans().concat([plan]))).filter((name) => plans[name]).forEach((name) => {
+    const pinnedList = getPinnedPlans();
+    const visiblePlans = (screen === 'train' && pinnedList.length === 0) ? [] : Array.from(new Set(pinnedList.concat([plan]))).filter((name) => plans[name]);
+    visiblePlans.forEach((name) => {
       const b = document.createElement('button');
       b.className = 'split-btn' + (name === plan ? ' active' : '');
       b.type = 'button';
@@ -268,16 +272,30 @@
     return Array.isArray(prs) ? prs.slice(-limit).reverse() : [];
   }
   function renderDashboard() {
+    const pinned = getPinnedPlans();
     const last = getLastTraining(user);
     const next = getNextSuggestion(user);
     const summary = getWorkoutSummary();
-    const recentPRs = getRecentPRs(user, 3);
+    const recentPRs = getRecentPRs(user, 4);
     const lastSummary = S.get('lastWorkoutSummary_' + user, null);
-    const log = getTrainingLog(user).slice(-8).reverse();
-    const calendar = log.length ? log.map((entry) => `<div class="mini-cal-item"><span>${esc(entry.date)}</span><strong>${esc(entry.plan)} · ${esc(entry.label)}</strong></div>`).join('') : '<div class="empty small"><h3>Noch keine abgeschlossenen Tage</h3><p>Schließe ein Training ab, dann erscheint es hier.</p></div>';
+    const log = getTrainingLog(user).slice(-5).reverse();
+    const latestSessions = allUserExerciseSessions(user).slice(-30);
+    const uniqueExercises = Array.from(new Set(latestSessions.map((entry) => entry.exerciseId))).slice(-4);
+    const progressCards = uniqueExercises.length ? uniqueExercises.map((id) => {
+      const entries = latestSessions.filter((entry) => entry.exerciseId === id);
+      const lastEntry = entries[entries.length - 1];
+      const exName = (allExercises.find((ex) => ex.id === id) || {}).n || id;
+      const best = entries.flatMap((entry) => (entry.sets || []).map((set) => ({ kg: parseFloat(set.kg) || 0, reps: parseFloat(set.reps) || 0 }))).sort((a,b)=>(b.kg*b.reps)-(a.kg*a.reps))[0];
+      return `<div class="mini-progress-card"><strong>${esc(exName)}</strong><span>Letztes Mal: ${lastEntry ? esc(lastEntry.date) : '-'}<br>${best ? 'Bestwert: '+best.kg+'kg × '+best.reps : 'Noch kein Bestwert'}</span></div>`;
+    }).join('') : '<div class="empty small"><h3>Noch kein Fortschritt</h3><p>Speichere Sätze, dann erscheinen hier deine Werte.</p></div>';
+    const pinnedHtml = pinned.length ? `<div class="pinned-plans-grid">${pinned.map((name)=>{ const p=plans[name]||[]; return `<div class="pinned-plan-card"><div class="pinned-plan-top"><div><div class="pinned-plan-name">${esc(name)}</div><div class="pinned-plan-meta">${p.length} Tage · ${p.reduce((s,d)=>s+d.ex.length,0)} Übungen</div></div><button class="hub-btn primary" type="button" data-start-plan="${esc(name)}">Starten</button></div></div>`; }).join('')}</div>` : `<div class="empty-hero"><div class="empty-hero-icon">📌</div><h3>Keine Pläne angeheftet</h3><p>Wähle dir in der Planbibliothek deine Trainingspläne aus. Erst dann erscheint im Training etwas.</p><div class="empty-actions"><button class="primary" type="button" id="home-pin-plan">Plan anheften</button><button class="secondary" type="button" id="home-create-plan">Plan erstellen</button></div></div>`;
     const prsHtml = recentPRs.length ? recentPRs.map((pr) => `<div class="pr-row"><span>🏆 ${esc(pr.exercise)}</span><strong>${pr.kg}kg × ${pr.reps}</strong></div>`).join('') : '<div class="quick-sub">Noch keine PRs. Speichere ein paar Einheiten.</div>';
-    $('home-content').innerHTML = `<div class="dashboard-hero"><div><div class="quick-label">Willkommen zurück</div><div class="dashboard-title">${esc(user)}</div><div class="quick-sub">${last ? `Zuletzt: ${esc(last.plan)} · ${esc(last.label)} am ${esc(last.date)}` : 'Noch kein Training abgeschlossen.'}</div></div><button class="quick-btn" id="home-start" type="button">${esc(next.label)} öffnen</button></div><div class="dash-grid"><div class="dash-stat"><strong>${summary.weekCount}</strong><span>Diese Woche</span></div><div class="dash-stat"><strong>${summary.totalSets}</strong><span>Sätze gesamt</span></div><div class="dash-stat"><strong>${summary.totalVolume}</strong><span>kg Volumen</span></div></div><div class="quick-card"><div class="quick-label">Nächster Vorschlag</div><div class="quick-title">${esc(next.plan)} · ${esc(next.label)}</div><div class="quick-sub">Vorschlag bleibt freiwillig. Du kannst weiterhin jeden Plan und Tag wählen.</div></div>${lastSummary ? `<div class="quick-card"><div class="quick-label">Letzte Zusammenfassung</div><div class="quick-title">${esc(lastSummary.plan)} · ${esc(lastSummary.label)}</div><div class="quick-sub">${lastSummary.exercises} Übungen · ${lastSummary.sets} Sätze · ${lastSummary.volume}kg Volumen</div></div>` : ''}<div class="quick-card"><div class="quick-label">Letzte Rekorde</div>${prsHtml}</div><div class="quick-card"><div class="quick-label">Trainingshistorie</div><div class="mini-calendar">${calendar}</div></div>`;
+    const historyHtml = log.length ? log.map((entry) => `<div class="mini-cal-item"><span>${esc(entry.date)}</span><strong>${esc(entry.plan)} · ${esc(entry.label)}</strong></div>`).join('') : '<div class="empty small"><h3>Noch keine abgeschlossenen Tage</h3><p>Schließe ein Training ab, dann erscheint es hier.</p></div>';
+    $('home-content').innerHTML = `<div class="dashboard-hero"><div><div class="quick-label">Home</div><div class="dashboard-title">Hi ${esc(user)}</div><div class="quick-sub">${last ? `Zuletzt: ${esc(last.plan)} · ${esc(last.label)} am ${esc(last.date)}` : 'Noch kein Training abgeschlossen.'}</div></div>${pinned.length ? `<button class="quick-btn" id="home-start" type="button">${esc(next.label)} öffnen</button>` : ''}</div><div class="dash-grid"><div class="dash-stat"><strong>${summary.weekCount}</strong><span>Diese Woche</span></div><div class="dash-stat"><strong>${summary.totalSets}</strong><span>Sätze gesamt</span></div><div class="dash-stat"><strong>${summary.totalVolume}</strong><span>kg Volumen</span></div></div><div class="home-section-title"><h3>Angeheftete Pläne</h3><span>Training</span></div>${pinnedHtml}<div class="home-section-title"><h3>Fortschritt</h3><span>Live</span></div><div class="mini-progress-grid">${progressCards}</div>${lastSummary ? `<div class="quick-card"><div class="quick-label">Letzte Zusammenfassung</div><div class="quick-title">${esc(lastSummary.plan)} · ${esc(lastSummary.label)}</div><div class="quick-sub">${lastSummary.exercises} Übungen · ${lastSummary.sets} Sätze · ${lastSummary.volume}kg Volumen</div></div>` : ''}<div class="quick-card"><div class="quick-label">PRs</div><div class="quick-title">Persönliche Rekorde</div>${prsHtml}</div><div class="quick-card mini-calendar"><div class="quick-label">Verlauf</div><div class="quick-title">Letzte Trainings</div>${historyHtml}</div>`;
     $('home-start')?.addEventListener('click', openSuggestedTraining);
+    $('home-pin-plan')?.addEventListener('click', () => setScreen('plans'));
+    $('home-create-plan')?.addEventListener('click', () => { setScreen('plans'); setTimeout(() => $('blank-template')?.click(), 50); });
+    document.querySelectorAll('[data-start-plan]').forEach((btn) => btn.addEventListener('click', () => { setPlan(btn.dataset.startPlan); setScreen('train'); }));
   }
 
   function renderTraining() {
@@ -552,7 +570,14 @@
   function exportLocalData() { const data = { version: 1, exportedAt: new Date().toISOString(), items: {} }; S.keys().forEach((key) => { data.items[key] = localStorage.getItem(key); }); const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'gymbaddies-backup.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); showToast('Backup erstellt.'); }
   function importLocalData(file) { if (!file) return; const reader = new FileReader(); reader.onload = () => { try { const data = JSON.parse(reader.result); if (!data.items) throw new Error('ungueltig'); Object.keys(data.items).forEach((key) => localStorage.setItem(key, data.items[key])); showToast('Backup importiert.'); setTimeout(() => location.reload(), 700); } catch { showToast('Backup konnte nicht importiert werden.'); } }; reader.readAsText(file); }
   function clearLocalData() { if (!confirm('Alle lokalen GymBaddies-Daten auf diesem Gerät löschen?')) return; S.keys().forEach((key) => { if (key === 'users' || key === 'customPlans' || key === 'customExercises' || key === 'theme_default' || key.indexOf('theme_') === 0 || key.indexOf('pinnedPlans_') === 0 || key.indexOf('sessions_') === 0 || key.indexOf('trainingLog_') === 0 || key.indexOf('prs_') === 0 || key.indexOf('h_') === 0 || key.indexOf('done_') === 0) S.remove(key); }); showToast('Daten gelöscht.'); setTimeout(() => location.reload(), 700); }
-  function runChecks() { const checks = [['plans', () => Object.keys(plans).length >= 3], ['exercise db', () => D.EXERCISE_DB.length >= 35], ['buttons', () => $('add-user-btn') && $('top-plans') && $('top-settings')], ['storage', () => S.set('__test', true) && S.get('__test') === true]]; checks.forEach(([name, fn]) => { try { if (!fn()) console.warn('Check failed:', name); } catch (e) { console.warn('Check error:', name, e); } }); S.remove('__test'); }
-  function init() { loadPlans(); migrateLegacyScopedSettings(); applySavedTheme(); renderUserScreen(); bindDynamicEvents(); const input = $('new-user-inp'); const add = $('add-user-btn'); const update = () => add.classList.toggle('ready', !!input.value.trim()); input.addEventListener('input', update); input.addEventListener('keydown', (e) => { if (e.key === 'Enter') addUser(); }); add.addEventListener('click', addUser); add.addEventListener('touchend', (e) => { e.preventDefault(); addUser(); }, { passive: false }); $('user-switch').addEventListener('click', goUsers); $('tab-home').addEventListener('click', () => setScreen('home')); $('tab-train').addEventListener('click', () => setScreen('train')); $('tab-progress').addEventListener('click', () => setScreen('progress')); $('top-plans').addEventListener('click', () => setScreen('plans')); $('top-settings').addEventListener('click', () => setScreen('settings')); $('rest-close').addEventListener('click', () => { clearInterval(window.__restTimer); $('rest-float').classList.remove('show'); }); update(); runChecks(); }
+  function runChecks() { const checks = [['plans', () => Object.keys(plans).length >= 3], ['exercise db', () => D.EXERCISE_DB.length >= 35], ['buttons', () => $('add-user-btn') && $('top-plans') && $('top-profile-menu')], ['storage', () => S.set('__test', true) && S.get('__test') === true]]; checks.forEach(([name, fn]) => { try { if (!fn()) console.warn('Check failed:', name); } catch (e) { console.warn('Check error:', name, e); } }); S.remove('__test'); }
+  function toggleAccountMenu() {
+    const menu = $('account-menu');
+    if (!menu) return;
+    menu.classList.toggle('show');
+  }
+  function closeAccountMenu() { $('account-menu')?.classList.remove('show'); }
+
+  function init() { loadPlans(); migrateLegacyScopedSettings(); applySavedTheme(); renderUserScreen(); bindDynamicEvents(); const input = $('new-user-inp'); const add = $('add-user-btn'); const update = () => add.classList.toggle('ready', !!input.value.trim()); input.addEventListener('input', update); input.addEventListener('keydown', (e) => { if (e.key === 'Enter') addUser(); }); add.addEventListener('click', addUser); add.addEventListener('touchend', (e) => { e.preventDefault(); addUser(); }, { passive: false }); $('top-profile-menu').addEventListener('click', toggleAccountMenu); $('menu-settings').addEventListener('click', () => { closeAccountMenu(); setScreen('settings'); }); $('menu-profile-switch').addEventListener('click', () => { closeAccountMenu(); goUsers(); }); $('menu-close').addEventListener('click', closeAccountMenu); document.addEventListener('click', (event) => { if (!event.target.closest('#account-menu') && !event.target.closest('#top-profile-menu')) closeAccountMenu(); }); $('tab-home').addEventListener('click', () => setScreen('home')); $('tab-train').addEventListener('click', () => setScreen('train')); $('top-plans').addEventListener('click', () => setScreen('plans')); $('rest-close').addEventListener('click', () => { clearInterval(window.__restTimer); $('rest-float').classList.remove('show'); }); update(); runChecks(); }
   document.addEventListener('DOMContentLoaded', init);
 }());
