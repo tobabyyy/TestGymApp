@@ -30,18 +30,17 @@
         <div class="h-title">GymBaddies 💪</div>
         <div class="h-actions">
           <button id="top-plans" type="button" class="top-chip"><span>🛠️</span><span>Pläne</span></button>
-          <button id="top-settings" type="button" class="top-icon" aria-label="Einstellungen">⚙️</button>
-          <button class="h-user" id="user-switch" type="button" aria-label="Profil wechseln">
+          <button class="h-user top-profile" id="top-profile-menu" type="button" aria-label="Profil und Einstellungen">
             <span class="h-avatar" id="h-avatar"></span>
             <span class="h-name" id="h-name"></span>
+            <span class="menu-dot">⌄</span>
           </button>
         </div>
       </div>
       <div class="seg">
         <button class="seg-btn active" id="tab-home" type="button">🏠 Home</button>
         <button class="seg-btn" id="tab-train" type="button">🏋️ Training</button>
-        <button class="seg-btn" id="tab-progress" type="button">📈 Fortschritt</button>
-      </div>
+        </div>
       <div class="split-tabs" id="split-tabs"></div>
       <div class="daytabs" id="daytabs"></div>
     </header>
@@ -61,6 +60,11 @@
       <button class="rest-close" type="button" id="rest-close">×</button>
     </div>
     <div id="app-toast" class="toast"></div>
+    <div id="account-menu" class="account-menu" aria-hidden="true">
+      <button type="button" id="menu-settings">⚙️ Einstellungen</button>
+      <button type="button" id="menu-profile-switch">👥 Profil wechseln</button>
+      <button type="button" id="menu-close">Schließen</button>
+    </div>
   </div>
 
   <script src="js/storage.js"></script>
